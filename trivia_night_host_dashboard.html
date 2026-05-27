@@ -1166,12 +1166,12 @@ function renderQuestionsEditor() {
       <div class="opt-inputs">
         ${q.options.map((opt,oi) => `
           <div class="opt-in-wrap">
-            <span class="opt-in-label" style="color:${oi===q.correct?'var(--green)':'var(--muted)'}">${LETTERS[oi]}${oi===q.correct?' ✓':''}</span>
-            <input class="opt-in" type="text" value="${opt}" onchange="updateQOption(${qi},${oi},this.value)" onclick="setCorrect(${qi},${oi})" style="border-color:${oi===q.correct?'rgba(61,214,140,0.5)':'var(--border)'}">
+            <span class="opt-in-label" style="color:${oi===q.correct?'var(--green)':'var(--muted)'};cursor:pointer;" onclick="setCorrect(${qi},${oi})">${LETTERS[oi]}${oi===q.correct?' ✓':''}</span>
+            <input class="opt-in" type="text" value="${opt}" onchange="updateQOption(${qi},${oi},this.value)" style="border-color:${oi===q.correct?'rgba(61,214,140,0.5)':'var(--border)'}">
           </div>
         `).join('')}
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Click an option field to mark it as the correct answer</div>`;
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Click the letter to mark the correct answer — click the field to edit text</div>`;
     list.appendChild(div);
   });
 }
