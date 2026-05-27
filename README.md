@@ -285,7 +285,7 @@ Once set up, only the GitHub account matching `ALLOWED_GITHUB_LOGIN` can sign in
 
 | Layer | Tool |
 |---|---|
-| Hosting | GitHub Pages or any static file server |
+| Hosting | GitHub Pages, Firebase Hosting, or any static file server |
 | Database | Firebase Realtime Database (free tier) |
 | Auth (Session Manager only) | Firebase Authentication + GitHub OAuth |
 | QR codes | qrcodejs (runs entirely in the browser) |
