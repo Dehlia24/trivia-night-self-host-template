@@ -290,6 +290,10 @@ Once set up, only the GitHub account matching `ALLOWED_GITHUB_LOGIN` can sign in
 | Auth (Session Manager only) | Firebase Authentication + GitHub OAuth |
 | QR codes | qrcodejs (runs entirely in the browser) |
 
+## Contributing
+
+Have a great set of trivia questions? [Contribute a question bank](CONTRIBUTING.md) to the community library.
+
 ---
 
 ## About
