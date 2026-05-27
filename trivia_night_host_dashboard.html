@@ -1549,7 +1549,26 @@ function onTemplateSelect() {
 }
 
 async function loadSelectedTemplate() {
-  if (!selectedTemplateKey || !templates[selectedTemplateKey]) { showNotif('Select a template first', 'error'); return; }
+  if (!selectedTemplateKey) { showNotif('Select a template first', 'error'); return; }
+  if (selectedTemplateKey.startsWith('community::')) {
+    const file = selectedTemplateKey.replace('community::', '');
+    const bank = communityBanks.find(b => b.file === file);
+    if (!bank) { showNotif('Community bank not found', 'error'); return; }
+    if (questionBank.length > 0 && !confirm(`Replace your current ${questionBank.length}-question bank with "${bank.name}"?`)) return;
+    try {
+      const res = await fetch(COMMUNITY_FILE_BASE + file);
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+      questionBank = data.questions;
+      await gref('questionBank').set(questionBank);
+      renderQuestionsEditor();
+      showNotif(`Loaded "${bank.name}"`);
+    } catch {
+      showNotif('Failed to load community bank — check your connection', 'error');
+    }
+    return;
+  }
+  if (!templates[selectedTemplateKey]) { showNotif('Select a template first', 'error'); return; }
   const tmpl = templates[selectedTemplateKey];
   if (questionBank.length > 0 && !confirm(`Replace your current ${questionBank.length}-question bank with "${tmpl.name}"?`)) return;
   questionBank = Array.isArray(tmpl.questions) ? [...tmpl.questions] : Object.values(tmpl.questions);
