@@ -1118,7 +1118,7 @@ async function clearPlayers() {
 
 async function resetGame() {
   clearInterval(timerInterval);
-  gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {} };
+  gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {}, rematch: true };
   responses = {};
   for (const pid of Object.keys(players)) players[pid].score = 0;
   await gref('responses').remove();

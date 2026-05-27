@@ -355,6 +355,17 @@
       <p class="sub" style="margin-bottom:0;">Waiting for the host to start the game...</p>
       <p style="margin-top:16px;color:var(--accent);font-family:var(--font-head);font-size:18px;font-weight:700;" id="wait-name"></p>
     </div>
+    <div id="rematch-rename" style="display:none;margin-top:8px;text-align:center;">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:10px;">Want a different name this round?</p>
+      <div style="display:flex;gap:8px;justify-content:center;">
+        <input type="text" id="rematch-name-input" maxlength="24" autocomplete="off"
+          style="flex:1;max-width:180px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;outline:none;"
+          onkeydown="if(event.key==='Enter')changeRematchName()">
+        <button onclick="changeRematchName()"
+          style="padding:10px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;">Update</button>
+      </div>
+      <div id="rematch-name-error" style="color:#f26b6b;font-size:13px;margin-top:6px;min-height:18px;"></div>
+    </div>
   </div>
 
   <!-- QUESTION SCREEN -->
@@ -597,13 +608,13 @@
 <script>
 // ─── Firebase config — must match the host file exactly ──────────────────────
 const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId:             "YOUR_APP_ID"
+  apiKey:            "AIzaSyDJ28_e0fMgwZJ7NahQx7gt8_iX2VO2rns",
+  authDomain:        "trivia-127b9.firebaseapp.com",
+  databaseURL:       "https://trivia-127b9-default-rtdb.firebaseio.com",
+  projectId:         "trivia-127b9",
+  storageBucket:     "trivia-127b9.firebasestorage.app",
+  messagingSenderId: "534126219859",
+  appId:             "1:534126219859:web:adb61b3728e25c7d112ca6"
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -689,6 +700,7 @@ async function joinGame() {
   sessionStorage.setItem('trivia_session', JSON.stringify({ gameCode, myId, myName, myScore: 0 }));
 
   document.getElementById('wait-name').textContent = myName;
+  document.getElementById('rematch-rename').style.display = 'none';
   showScreen('screen-waiting');
 
   attachGameListeners();
@@ -740,7 +752,11 @@ function attachGameListeners() {
 // ─── Game state handler ───────────────────────────────────────────────────────
 function onGameStateChange(state) {
   if (state.status === 'waiting' && gameStatus === 'gameover') {
-    resetToJoin();
+    if (state.rematch) {
+      resetForRematch();
+    } else {
+      resetToJoin();
+    }
     return;
   }
 
@@ -913,6 +929,65 @@ function resetToJoin() {
   showScreen('screen-join');
 }
 
+// ─── Rematch: stay in game, optional name change ──────────────────────────────
+function resetForRematch() {
+  clearInterval(timerInterval);
+  myScore = 0;
+  myAnswers = {};
+  currentQIdx = -1;
+  gameStatus = 'waiting';
+
+  // Re-set onDisconnect handlers (they may have been cleared by Firebase on reconnect)
+  gref('players/' + myId).onDisconnect().remove();
+  gref('responses/' + myId).onDisconnect().remove();
+
+  // Re-attach listeners that showGameOver() detached
+  gref('questions').on('value', snap => {
+    const qs = snap.val();
+    if (qs) questions = Array.isArray(qs) ? qs : Object.values(qs);
+  });
+  gref('players/' + myId + '/score').on('value', snap => {
+    const score = snap.val();
+    if (score !== null && score !== undefined) {
+      myScore = score;
+      try {
+        const sess = JSON.parse(sessionStorage.getItem('trivia_session') || '{}');
+        if (sess.myId === myId) { sess.myScore = score; sessionStorage.setItem('trivia_session', JSON.stringify(sess)); }
+      } catch(_) {}
+    }
+  });
+
+  sessionStorage.setItem('trivia_session', JSON.stringify({ gameCode, myId, myName, myScore: 0 }));
+
+  document.getElementById('wait-name').textContent = myName;
+  document.getElementById('rematch-name-input').value = myName;
+  document.getElementById('rematch-name-error').textContent = '';
+  document.getElementById('rematch-rename').style.display = 'block';
+  showScreen('screen-waiting');
+}
+
+async function changeRematchName() {
+  const newName = document.getElementById('rematch-name-input').value.trim();
+  const errEl = document.getElementById('rematch-name-error');
+  errEl.textContent = '';
+  if (!newName) return;
+  if (newName === myName) return;
+
+  const snap = await gref('players').get();
+  const existing = snap.val() || {};
+  const taken = Object.entries(existing).some(([id, p]) => id !== myId && p.name?.toLowerCase() === newName.toLowerCase());
+  if (taken) {
+    errEl.textContent = 'That name is already taken — choose another.';
+    return;
+  }
+
+  myName = newName;
+  await gref('players/' + myId + '/name').set(myName);
+  document.getElementById('wait-name').textContent = myName;
+  document.getElementById('rematch-name-input').value = myName;
+  sessionStorage.setItem('trivia_session', JSON.stringify({ gameCode, myId, myName, myScore: 0 }));
+}
+
 // ─── Theme (player-local, independent of host preference) ────────────────────
 function applyTheme() {
   const t = localStorage.getItem('trivia_player_theme') || 'dark';
@@ -1020,6 +1095,7 @@ async function doRejoin() {
   gref('responses/' + myId).onDisconnect().remove();
 
   document.getElementById('wait-name').textContent = myName;
+  document.getElementById('rematch-rename').style.display = 'none';
   showScreen('screen-waiting');
   attachGameListeners();
 }
