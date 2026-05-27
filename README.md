@@ -289,3 +289,9 @@ Once set up, only the GitHub account matching `ALLOWED_GITHUB_LOGIN` can sign in
 | Database | Firebase Realtime Database (free tier) |
 | Auth (Session Manager only) | Firebase Authentication + GitHub OAuth |
 | QR codes | qrcodejs (runs entirely in the browser) |
+
+---
+
+## About
+
+This project was built and is maintained using [Claude Code](https://claude.ai/code) by Anthropic.
