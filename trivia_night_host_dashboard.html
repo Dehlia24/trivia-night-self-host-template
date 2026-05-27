@@ -1596,10 +1596,88 @@ async function confirmSaveTemplate() {
   if (!name) { document.getElementById('tmpl-name-input').focus(); return; }
   const key = 'tmpl_' + Date.now();
   await db.ref('templates/' + key).set({ name, questions: questionBank, savedAt: Date.now() });
+  lastSavedTemplateName = name;
   closeSaveTemplate();
   showNotif(`Template "${name}" saved!`);
-  // Auto-select the newly saved template
+  document.getElementById('tmpl-submit-row').classList.add('open');
   setTimeout(() => { selectedTemplateKey = key; tmplComboClose(); onTemplateSelect(); }, 300);
+}
+
+function closeSubmitRow() {
+  document.getElementById('tmpl-submit-row').classList.remove('open');
+}
+
+async function submitToCommunity() {
+  if (!lastSavedTemplateName) return;
+  const name = lastSavedTemplateName;
+  const file = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + '.json';
+  const branch = `community/bank-${Date.now()}`;
+  const headers = {
+    'Authorization': `token ${COMMUNITY_PAT}`,
+    'Accept': 'application/vnd.github.v3+json',
+    'Content-Type': 'application/json'
+  };
+  try {
+    // Get SHA of main branch HEAD
+    const refRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/git/ref/heads/main`, { headers });
+    if (!refRes.ok) throw new Error('ref');
+    const mainSha = (await refRes.json()).object.sha;
+
+    // Create branch
+    const branchRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/git/refs`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: mainSha })
+    });
+    if (!branchRes.ok) throw new Error('branch');
+
+    // Commit bank JSON file
+    const bankJson = JSON.stringify({ name, author: '', description: '', questions: questionBank }, null, 2);
+    const fileRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/${file}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({
+        message: `Community bank: ${name}`,
+        content: btoa(unescape(encodeURIComponent(bankJson))),
+        branch
+      })
+    });
+    if (!fileRes.ok) throw new Error('file');
+
+    // Fetch current index.json and append new entry
+    const idxRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/index.json`, { headers });
+    if (!idxRes.ok) throw new Error('index fetch');
+    const idxData = await idxRes.json();
+    const currentIndex = JSON.parse(atob(idxData.content.replace(/\s/g, '')));
+    currentIndex.push({ name, author: '', description: '', file, questionCount: questionBank.length });
+    const idxUpdateRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/index.json`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({
+        message: `Community bank: ${name} — update index`,
+        content: btoa(unescape(encodeURIComponent(JSON.stringify(currentIndex, null, 2)))),
+        sha: idxData.sha,
+        branch
+      })
+    });
+    if (!idxUpdateRes.ok) throw new Error('index update');
+
+    // Open pull request
+    const prRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/pulls`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        title: `Community bank: ${name}`,
+        head: branch, base: 'main',
+        body: `Community question bank submitted from the trivia night host dashboard.\n\n**Bank:** ${name}\n**Questions:** ${questionBank.length}`
+      })
+    });
+    if (!prRes.ok) throw new Error('PR');
+    const prData = await prRes.json();
+
+    closeSubmitRow();
+    showNotif('PR submitted! Opening in new tab…');
+    setTimeout(() => window.open(prData.html_url, '_blank'), 600);
+  } catch {
+    closeSubmitRow();
+    showNotif('Submit failed — open a PR manually at github.com/dehlia24/trivia-night', 'error');
+  }
 }
 
 async function deleteSelectedTemplate() {
