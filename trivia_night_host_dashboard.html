@@ -733,6 +733,13 @@ let questionBank = [];    // full pool stored in games/<code>/questionBank
 let usedQuestions = {};   // { fingerprint: timestamp } — persisted in games/<code>/usedQuestions
 let pinnedQuestions = {}; // { fingerprint: true } — guaranteed in next game
 let templates = {};       // globally shared named banks, stored in /templates
+let communityBanks = [];  // banks fetched from question-banks/index.json on GitHub
+let lastSavedTemplateName = '';
+
+const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/dehlia24/trivia-night/main/question-banks/index.json';
+const COMMUNITY_FILE_BASE = 'https://raw.githubusercontent.com/dehlia24/trivia-night/main/question-banks/';
+const COMMUNITY_REPO = 'dehlia24/trivia-night';
+const COMMUNITY_PAT = 'YOUR_PAT_HERE'; // fine-grained PAT: contents+PRs write on dehlia24/trivia-night only
 let responses = {};
 let players = {};
 let timerInterval = null;
@@ -862,6 +869,7 @@ async function init() {
     templates = snap.val() || {};
     populateTemplateDropdown();
   });
+  loadCommunityBanks();
 
   // ── Players & responses ───────────────────────────────────────────────────────
   gref('players').on('value', snap => {
@@ -1369,39 +1377,78 @@ async function endSession() {
   window.location.href = location.pathname; // new session, fresh code
 }
 
+// ─── Community banks (fetched from GitHub at load time) ───────────────────────
+async function loadCommunityBanks() {
+  try {
+    const res = await fetch(COMMUNITY_INDEX_URL);
+    if (!res.ok) throw new Error('fetch failed');
+    communityBanks = await res.json();
+  } catch {
+    communityBanks = [];
+  }
+  populateTemplateDropdown();
+}
+
 // ─── Templates combo box ──────────────────────────────────────────────────────
 let selectedTemplateKey = '';
 let tmplComboActiveIdx = -1;
 
 function tmplComboGetFiltered() {
   const filter = (document.getElementById('tmpl-search')?.value || '').toLowerCase().trim();
-  const sorted = Object.entries(templates).sort(([,a],[,b]) => (b.savedAt||0) - (a.savedAt||0));
-  return filter ? sorted.filter(([, t]) => t.name.toLowerCase().includes(filter)) : sorted;
+  const sortedFirebase = Object.entries(templates).sort(([,a],[,b]) => (b.savedAt||0) - (a.savedAt||0));
+  return {
+    community: filter ? communityBanks.filter(b => b.name.toLowerCase().includes(filter)) : communityBanks,
+    firebase:  filter ? sortedFirebase.filter(([, t]) => t.name.toLowerCase().includes(filter)) : sortedFirebase
+  };
 }
 
 function tmplComboRenderList() {
   const list = document.getElementById('tmpl-combo-list');
   if (!list) return;
-  const filtered = tmplComboGetFiltered();
+  const { community, firebase } = tmplComboGetFiltered();
   list.innerHTML = '';
   tmplComboActiveIdx = -1;
-  if (filtered.length === 0) {
+
+  if (community.length === 0 && firebase.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'tmpl-combo-empty';
     empty.textContent = 'No templates match';
     list.appendChild(empty);
     return;
   }
-  filtered.forEach(([key, tmpl], i) => {
-    const qCount = Array.isArray(tmpl.questions) ? tmpl.questions.length : 0;
-    const date = tmpl.savedAt ? new Date(tmpl.savedAt).toLocaleDateString() : '';
-    const item = document.createElement('div');
-    item.className = 'tmpl-combo-option' + (key === selectedTemplateKey ? ' selected' : '');
-    item.dataset.key = key;
-    item.textContent = `${tmpl.name}  (${qCount}q${date ? ' · ' + date : ''})`;
-    item.addEventListener('mousedown', e => { e.preventDefault(); tmplComboSelect(key); });
-    list.appendChild(item);
-  });
+
+  if (community.length > 0) {
+    const hdr = document.createElement('div');
+    hdr.className = 'tmpl-combo-header';
+    hdr.textContent = 'Community Banks';
+    list.appendChild(hdr);
+    community.forEach(bank => {
+      const key = 'community::' + bank.file;
+      const item = document.createElement('div');
+      item.className = 'tmpl-combo-option' + (key === selectedTemplateKey ? ' selected' : '');
+      item.dataset.key = key;
+      item.textContent = `${bank.name}  (${bank.questionCount}q · by ${bank.author || 'anonymous'})`;
+      item.addEventListener('mousedown', e => { e.preventDefault(); tmplComboSelect(key); });
+      list.appendChild(item);
+    });
+  }
+
+  if (firebase.length > 0) {
+    const hdr = document.createElement('div');
+    hdr.className = 'tmpl-combo-header';
+    hdr.textContent = 'My Saved Templates';
+    list.appendChild(hdr);
+    firebase.forEach(([key, tmpl]) => {
+      const qCount = Array.isArray(tmpl.questions) ? tmpl.questions.length : 0;
+      const date = tmpl.savedAt ? new Date(tmpl.savedAt).toLocaleDateString() : '';
+      const item = document.createElement('div');
+      item.className = 'tmpl-combo-option' + (key === selectedTemplateKey ? ' selected' : '');
+      item.dataset.key = key;
+      item.textContent = `${tmpl.name}  (${qCount}q${date ? ' · ' + date : ''})`;
+      item.addEventListener('mousedown', e => { e.preventDefault(); tmplComboSelect(key); });
+      list.appendChild(item);
+    });
+  }
 }
 
 function tmplComboOpen() {
@@ -1422,8 +1469,12 @@ function tmplComboClose() {
   const list = document.getElementById('tmpl-combo-list');
   input?.classList.remove('open');
   list?.classList.remove('open');
-  // Restore selected name in input
-  input.value = selectedTemplateKey && templates[selectedTemplateKey] ? templates[selectedTemplateKey].name : '';
+  if (selectedTemplateKey.startsWith('community::')) {
+    const bank = communityBanks.find(b => b.file === selectedTemplateKey.replace('community::', ''));
+    input.value = bank ? bank.name : '';
+  } else {
+    input.value = selectedTemplateKey && templates[selectedTemplateKey] ? templates[selectedTemplateKey].name : '';
+  }
 }
 
 function tmplComboFilter() {
@@ -1481,11 +1532,15 @@ function populateTemplateDropdown() {
 function onTemplateSelect() {
   const info = document.getElementById('tmpl-info');
   const delBtn = document.getElementById('tmpl-delete-btn');
-  if (!selectedTemplateKey || !templates[selectedTemplateKey]) {
-    info.textContent = '';
+  if (!selectedTemplateKey) { info.textContent = ''; delBtn.style.display = 'none'; return; }
+  if (selectedTemplateKey.startsWith('community::')) {
+    const bank = communityBanks.find(b => b.file === selectedTemplateKey.replace('community::', ''));
+    if (!bank) { info.textContent = ''; delBtn.style.display = 'none'; return; }
+    info.textContent = `${bank.questionCount} question${bank.questionCount !== 1 ? 's' : ''} · by ${bank.author || 'anonymous'}${bank.description ? ' · ' + bank.description : ''}`;
     delBtn.style.display = 'none';
     return;
   }
+  if (!templates[selectedTemplateKey]) { info.textContent = ''; delBtn.style.display = 'none'; return; }
   const tmpl = templates[selectedTemplateKey];
   const qCount = Array.isArray(tmpl.questions) ? tmpl.questions.length : 0;
   const date = tmpl.savedAt ? new Date(tmpl.savedAt).toLocaleString() : 'unknown';
