@@ -1,0 +1,9 @@
+[
+  {
+    "name": "General Knowledge",
+    "author": "dehlia24",
+    "description": "A broad mix of trivia across science, history, geography, and pop culture",
+    "file": "general-knowledge.json",
+    "questionCount": 15
+  }
+]

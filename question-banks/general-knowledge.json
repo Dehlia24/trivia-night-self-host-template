@@ -1,0 +1,22 @@
+{
+  "name": "General Knowledge",
+  "author": "dehlia24",
+  "description": "A broad mix of trivia across science, history, geography, and pop culture",
+  "questions": [
+    { "question": "What is the chemical symbol for gold?", "options": ["Au", "Ag", "Fe", "Pb"], "correct": 0, "category": "Science" },
+    { "question": "Which planet is known as the Red Planet?", "options": ["Venus", "Jupiter", "Mars", "Saturn"], "correct": 2, "category": "Science" },
+    { "question": "How many sides does a hexagon have?", "options": ["5", "6", "7", "8"], "correct": 1, "category": "Math" },
+    { "question": "What is the capital of France?", "options": ["London", "Berlin", "Madrid", "Paris"], "correct": 3, "category": "Geography" },
+    { "question": "Who painted the Mona Lisa?", "options": ["Michelangelo", "Raphael", "Leonardo da Vinci", "Donatello"], "correct": 2, "category": "Art" },
+    { "question": "What year did World War II end?", "options": ["1943", "1944", "1945", "1946"], "correct": 2, "category": "History" },
+    { "question": "Which element has the atomic number 1?", "options": ["Helium", "Hydrogen", "Lithium", "Carbon"], "correct": 1, "category": "Science" },
+    { "question": "What is the largest ocean on Earth?", "options": ["Atlantic", "Indian", "Arctic", "Pacific"], "correct": 3, "category": "Geography" },
+    { "question": "How many strings does a standard guitar have?", "options": ["4", "5", "6", "7"], "correct": 2, "category": "Music" },
+    { "question": "What is the fastest land animal?", "options": ["Lion", "Cheetah", "Leopard", "Horse"], "correct": 1, "category": "Nature" },
+    { "question": "Which country invented pizza?", "options": ["Greece", "Spain", "France", "Italy"], "correct": 3, "category": "Food" },
+    { "question": "How many bones are in the adult human body?", "options": ["186", "196", "206", "216"], "correct": 2, "category": "Science" },
+    { "question": "What is the longest river in the world?", "options": ["Amazon", "Nile", "Mississippi", "Yangtze"], "correct": 1, "category": "Geography" },
+    { "question": "In what year did the Titanic sink?", "options": ["1910", "1912", "1914", "1916"], "correct": 1, "category": "History" },
+    { "question": "What gas do plants absorb from the atmosphere?", "options": ["Oxygen", "Nitrogen", "Carbon Dioxide", "Hydrogen"], "correct": 2, "category": "Science" }
+  ]
+}
