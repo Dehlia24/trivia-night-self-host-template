@@ -736,10 +736,9 @@ let templates = {};       // globally shared named banks, stored in /templates
 let communityBanks = [];  // banks fetched from question-banks/index.json on GitHub
 let lastSavedTemplateName = '';
 
-const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/dehlia24/trivia-night/main/question-banks/index.json';
-const COMMUNITY_FILE_BASE = 'https://raw.githubusercontent.com/dehlia24/trivia-night/main/question-banks/';
-const COMMUNITY_REPO = 'dehlia24/trivia-night';
-const COMMUNITY_PAT = 'YOUR_PAT_HERE'; // fine-grained PAT: contents+PRs write on dehlia24/trivia-night only
+const COMMUNITY_INDEX_URL = 'https://raw.githubusercontent.com/dehlia24/trivia-night-self-host-template/main/question-banks/index.json';
+const COMMUNITY_FILE_BASE = 'https://raw.githubusercontent.com/dehlia24/trivia-night-self-host-template/main/question-banks/';
+const COMMUNITY_WORKER_URL = 'https://trivia-community-submit.ksweikert.workers.dev/submit';
 let responses = {};
 let players = {};
 let timerInterval = null;
@@ -1609,74 +1608,20 @@ function closeSubmitRow() {
 
 async function submitToCommunity() {
   if (!lastSavedTemplateName) return;
-  const name = lastSavedTemplateName;
-  const file = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + '.json';
-  const branch = `community/bank-${Date.now()}`;
-  const headers = {
-    'Authorization': `token ${COMMUNITY_PAT}`,
-    'Accept': 'application/vnd.github.v3+json',
-    'Content-Type': 'application/json'
-  };
   try {
-    // Get SHA of main branch HEAD
-    const refRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/git/ref/heads/main`, { headers });
-    if (!refRes.ok) throw new Error('ref');
-    const mainSha = (await refRes.json()).object.sha;
-
-    // Create branch
-    const branchRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/git/refs`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: mainSha })
+    const res = await fetch(COMMUNITY_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: lastSavedTemplateName, questions: questionBank })
     });
-    if (!branchRes.ok) throw new Error('branch');
-
-    // Commit bank JSON file
-    const bankJson = JSON.stringify({ name, author: '', description: '', questions: questionBank }, null, 2);
-    const fileRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/${file}`, {
-      method: 'PUT', headers,
-      body: JSON.stringify({
-        message: `Community bank: ${name}`,
-        content: btoa(unescape(encodeURIComponent(bankJson))),
-        branch
-      })
-    });
-    if (!fileRes.ok) throw new Error('file');
-
-    // Fetch current index.json and append new entry
-    const idxRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/index.json`, { headers });
-    if (!idxRes.ok) throw new Error('index fetch');
-    const idxData = await idxRes.json();
-    const currentIndex = JSON.parse(atob(idxData.content.replace(/\s/g, '')));
-    currentIndex.push({ name, author: '', description: '', file, questionCount: questionBank.length });
-    const idxUpdateRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/contents/question-banks/index.json`, {
-      method: 'PUT', headers,
-      body: JSON.stringify({
-        message: `Community bank: ${name} — update index`,
-        content: btoa(unescape(encodeURIComponent(JSON.stringify(currentIndex, null, 2)))),
-        sha: idxData.sha,
-        branch
-      })
-    });
-    if (!idxUpdateRes.ok) throw new Error('index update');
-
-    // Open pull request
-    const prRes = await fetch(`https://api.github.com/repos/${COMMUNITY_REPO}/pulls`, {
-      method: 'POST', headers,
-      body: JSON.stringify({
-        title: `Community bank: ${name}`,
-        head: branch, base: 'main',
-        body: `Community question bank submitted from the trivia night host dashboard.\n\n**Bank:** ${name}\n**Questions:** ${questionBank.length}`
-      })
-    });
-    if (!prRes.ok) throw new Error('PR');
-    const prData = await prRes.json();
-
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
     closeSubmitRow();
     showNotif('PR submitted! Opening in new tab…');
-    setTimeout(() => window.open(prData.html_url, '_blank'), 600);
-  } catch {
+    setTimeout(() => window.open(data.prUrl, '_blank'), 600);
+  } catch (e) {
     closeSubmitRow();
-    showNotif('Submit failed — open a PR manually at github.com/dehlia24/trivia-night', 'error');
+    showNotif(e.message || 'Submit failed — open a PR manually at github.com/dehlia24/trivia-night-self-host-template', 'error');
   }
 }
 
