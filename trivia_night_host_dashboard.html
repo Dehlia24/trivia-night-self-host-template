@@ -127,9 +127,11 @@
 
   .q-editor { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; transition: border-color 0.15s; }
   .q-editor.pinned { border-color: rgba(247,194,106,0.55); background: rgba(247,194,106,0.03); }
+  .q-editor.tiebreaker { border-color: rgba(224,36,36,0.4); }
   .pin-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 2px 8px; transition: all 0.15s; font-family: var(--font-body); }
   .pin-btn:hover { border-color: rgba(247,194,106,0.5); color: #f7c26a; }
   .pin-btn.active { color: #f7c26a; border-color: rgba(247,194,106,0.55); background: rgba(247,194,106,0.1); }
+  .tb-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgba(224,36,36,0.12); color: var(--accent); }
   .q-editor label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 6px; }
   .q-editor input, .q-editor select, .q-editor textarea {
     width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px;
@@ -653,6 +655,13 @@
               <option value="hard">Hard</option>
             </select>
           </div>
+          <div style="flex:1;">
+            <label style="font-size:12px;color:var(--muted);font-weight:500;display:block;margin-bottom:6px;">Question Type</label>
+            <select id="otdb-tiebreaker" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--font-body);font-size:14px;padding:8px 12px;outline:none;">
+              <option value="false">Normal</option>
+              <option value="true">Tie Breaker</option>
+            </select>
+          </div>
         </div>
         <div id="questions-list"></div>
       </div>
@@ -727,7 +736,7 @@ const gameCode = (() => {
 // Shorthand for game-scoped Firebase refs
 function gref(path) { return db.ref('games/' + gameCode + '/' + path); }
 
-let gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {} };
+let gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {}, tiebreakerRound: 0, suddenDeath: false, tiedPlayerIds: [] };
 let questions = [];       // active game questions (random sample chosen at start)
 let questionBank = [];    // full pool stored in games/<code>/questionBank
 let usedQuestions = {};   // { fingerprint: timestamp } — persisted in games/<code>/usedQuestions
@@ -755,6 +764,35 @@ function hashQuestion(q) {
 
 const LETTERS = ['A','B','C','D'];
 
+// Shuffles a question's options while preserving which one is correct
+function shuffleOptions(q) {
+  const opts = [...q.options];
+  const correctText = opts[q.correct];
+  for (let i = opts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [opts[i], opts[j]] = [opts[j], opts[i]];
+  }
+  return { ...q, options: opts, correct: opts.indexOf(correctText) };
+}
+
+// Player ids currently sharing the top score (length 1 = clear leader, 0 = no players)
+function getTopTiedPlayers() {
+  const entries = Object.entries(players).map(([id, p]) => ({ id, score: p.score || 0 }));
+  if (entries.length === 0) return [];
+  const top = Math.max(...entries.map(e => e.score));
+  return entries.filter(e => e.score === top).map(e => e.id);
+}
+
+// Draws a random unused tie-breaker question from the bank, marking it used. Null if none left.
+function pickTiebreakerQuestion() {
+  const pool = questionBank.filter(q => q.tiebreaker && !usedQuestions[hashQuestion(q)]);
+  if (pool.length === 0) return null;
+  const raw = pool[Math.floor(Math.random() * pool.length)];
+  usedQuestions[hashQuestion(raw)] = Date.now();
+  gref('usedQuestions').set(usedQuestions);
+  return { ...shuffleOptions(raw), tiebreaker: true };
+}
+
 function showNotif(msg, type='success') {
   const n = document.getElementById('notif');
   n.textContent = msg;
@@ -766,10 +804,12 @@ function saveSetting(key, value) { gref('settings/' + key).set(Number(value)); }
 
 function updateBankCount() {
   const pinnedCount = questionBank.filter(q => pinnedQuestions[hashQuestion(q)]).length;
+  const tiebreakerCount = questionBank.filter(q => q.tiebreaker).length;
   const available = questionBank.filter(q => !usedQuestions[hashQuestion(q)]).length;
   const used = questionBank.length - available;
   const el = document.getElementById('bank-count');
   let text = questionBank.length === 0 ? '0 questions' : `${questionBank.length} questions`;
+  if (tiebreakerCount > 0) text += ` (${tiebreakerCount} tie breaker${tiebreakerCount === 1 ? '' : 's'})`;
   if (used > 0) text += ` — ${available} available, ${used} used in last 24h`;
   if (pinnedCount > 0) text += ` — ${pinnedCount} pinned`;
   el.textContent = text;
@@ -884,6 +924,7 @@ async function init() {
     responses = snap.val() || {};
     updateResponses();
     updateLeaderboard();
+    checkSuddenDeath();
   });
 
   renderQuestionsEditor();
@@ -902,7 +943,7 @@ function updateUI() {
   if (s === 'gameover') showWinner();
   updateLeaderboard();
   maxTime = parseInt(document.getElementById('time-setting').value) || 30;
-  document.getElementById('stat-question').textContent = s === 'active' ? (gameState.currentQ+1) + '/' + questions.length : '—';
+  if (s !== 'active') document.getElementById('stat-question').textContent = '—';
 }
 
 function renderProgressDots() {
@@ -919,10 +960,15 @@ function renderCurrentQuestion() {
   if (!questions[gameState.currentQ]) return;
   const q = questions[gameState.currentQ];
   renderProgressDots();
-  document.getElementById('q-num-label').textContent = 'Q' + (gameState.currentQ+1);
+  if (q.tiebreaker) {
+    document.getElementById('q-num-label').textContent = gameState.suddenDeath ? '💀 SUDDEN DEATH' : `🔥 TIE BREAKER — Round ${gameState.tiebreakerRound}`;
+    document.getElementById('stat-question').textContent = gameState.suddenDeath ? 'Sudden death' : 'Tie breaker ' + gameState.tiebreakerRound;
+  } else {
+    document.getElementById('q-num-label').textContent = 'Q' + (gameState.currentQ+1);
+    document.getElementById('stat-question').textContent = (gameState.currentQ+1) + '/' + questions.length;
+  }
   document.getElementById('q-cat-label').textContent = q.category || 'General';
   document.getElementById('q-text').textContent = q.question;
-  document.getElementById('stat-question').textContent = (gameState.currentQ+1) + '/' + questions.length;
   const grid = document.getElementById('options-grid');
   grid.innerHTML = '';
   q.options.forEach((opt, i) => {
@@ -960,26 +1006,23 @@ function startGame() {
   if (questionBank.length === 0) { showNotif('Add questions to the bank first!', 'error'); return; }
   const count = parseInt(document.getElementById('count-setting').value) || 10;
 
-  // Pinned questions are always included regardless of used status
-  const pinned = questionBank.filter(q => pinnedQuestions[hashQuestion(q)]);
+  const tiebreakerCount = questionBank.filter(q => q.tiebreaker).length;
+  if (tiebreakerCount > 0 && tiebreakerCount < 6) {
+    showNotif(`Only ${tiebreakerCount} tie-breaker question${tiebreakerCount === 1 ? '' : 's'} in the bank — sudden death may kick in earlier than round 6`, 'error');
+  }
+
+  // Pinned questions are always included regardless of used status (tie breakers are a separate pool, never in the main game)
+  const pinned = questionBank.filter(q => !q.tiebreaker && pinnedQuestions[hashQuestion(q)]);
   const pinnedToUse = pinned.slice(0, count);
   const remaining = count - pinnedToUse.length;
 
   // Fill remaining slots from unused, unpinned questions
-  const filler = questionBank.filter(q => !pinnedQuestions[hashQuestion(q)] && !usedQuestions[hashQuestion(q)]);
+  const filler = questionBank.filter(q => !q.tiebreaker && !pinnedQuestions[hashQuestion(q)] && !usedQuestions[hashQuestion(q)]);
   if (pinnedToUse.length === 0 && filler.length === 0) { showNotif('All questions used in the last 24h — add more or click Reset usage', 'error'); return; }
   if (pinnedToUse.length + filler.length < count) showNotif(`Only ${pinnedToUse.length + filler.length} questions available — using all of them`, 'error');
 
   const shuffledFiller = [...filler].sort(() => Math.random() - 0.5);
-  const selected = [...pinnedToUse, ...shuffledFiller.slice(0, remaining)].map(q => {
-    const opts = [...q.options];
-    const correctText = opts[q.correct];
-    for (let i = opts.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [opts[i], opts[j]] = [opts[j], opts[i]];
-    }
-    return { ...q, options: opts, correct: opts.indexOf(correctText) };
-  });
+  const selected = [...pinnedToUse, ...shuffledFiller.slice(0, remaining)].map(shuffleOptions);
   questions = spreadByCategory(selected);
 
   // Mark selected questions as used
@@ -990,6 +1033,7 @@ function startGame() {
   maxTime = parseInt(document.getElementById('time-setting').value) || 30;
   gameState.status = 'active'; gameState.currentQ = 0; gameState.revealed = false; gameState.scores = {};
   gameState.timeLeft = maxTime;
+  gameState.tiebreakerRound = 0; gameState.suddenDeath = false; gameState.tiedPlayerIds = [];
   for (const pid of Object.keys(players)) players[pid].score = 0;
   responses = {};
   gref('questions').set(questions);
@@ -1026,6 +1070,7 @@ function toggleTimer() {
 }
 
 function revealAnswer() {
+  if (gameState.revealed) return;
   gameState.revealed = true; clearInterval(timerInterval); gameState.timerRunning = false;
   const q = questions[gameState.currentQ];
   const pts = parseInt(document.getElementById('points-setting').value) || 1000;
@@ -1039,18 +1084,53 @@ function revealAnswer() {
     }
   }
   gref('players').set(players);
+  // Sudden death resolves the instant a clear leader emerges — don't wait for a manual Next click
+  if (gameState.suddenDeath && getTopTiedPlayers().length === 1) {
+    gameState.status = 'gameover';
+    gref('endedAt').set(Date.now());
+  }
   gref('gameState').set(gameState);
   renderCurrentQuestion(); updateResponses(); updateLeaderboard();
   document.getElementById('stat-correct').textContent = Object.values(responses).filter(r => r['q'+gameState.currentQ] === q.correct).length;
+  if (gameState.status === 'gameover') updateUI();
+}
+
+// If in sudden death and a tied player has already answered correctly, end the question immediately
+function checkSuddenDeath() {
+  if (gameState.status !== 'active' || !gameState.suddenDeath || gameState.revealed) return;
+  const q = questions[gameState.currentQ];
+  if (!q) return;
+  const qKey = 'q' + gameState.currentQ;
+  const resolved = (gameState.tiedPlayerIds || []).some(pid => responses[pid]?.[qKey] === q.correct);
+  if (resolved) revealAnswer();
 }
 
 function nextQuestion() {
   if (gameState.currentQ >= questions.length - 1) {
+    const tied = getTopTiedPlayers();
+    if (tied.length > 1) {
+      const tq = pickTiebreakerQuestion();
+      if (tq) {
+        gameState.tiebreakerRound = (gameState.tiebreakerRound || 0) + 1;
+        gameState.suddenDeath = gameState.tiebreakerRound > 5;
+        gameState.tiedPlayerIds = tied;
+        questions = [...questions, tq];
+        gref('questions').set(questions);
+        advanceToNextQuestion();
+        return;
+      }
+      // Tie-breaker bank exhausted mid-tie — end the game with joint winners
+      gameState.tiedPlayerIds = tied;
+    }
     gameState.status = 'gameover';
     gref('gameState').set(gameState);
     gref('endedAt').set(Date.now());
     updateUI(); return;
   }
+  advanceToNextQuestion();
+}
+
+function advanceToNextQuestion() {
   maxTime = parseInt(document.getElementById('time-setting').value) || 30;
   gameState.currentQ++; gameState.revealed = false; gameState.timeLeft = maxTime; responses = {};
   gref('responses').remove(); gref('gameState').set(gameState);
@@ -1105,7 +1185,12 @@ function showWinner() {
   const sorted = Object.entries(players)
     .map(([id, p]) => ({ name: p.name || id.slice(0,8), score: p.score || 0 }))
     .sort((a,b) => b.score - a.score);
-  if (sorted.length > 0) document.getElementById('winner-name').textContent = sorted[0].name + ' — ' + sorted[0].score.toLocaleString() + ' pts';
+  if (sorted.length === 0) return;
+  const topScore = sorted[0].score;
+  const winners = sorted.filter(p => p.score === topScore);
+  document.getElementById('winner-name').textContent = winners.length > 1
+    ? winners.map(w => w.name).join(' & ') + ' — ' + topScore.toLocaleString() + ' pts (tied)'
+    : winners[0].name + ' — ' + topScore.toLocaleString() + ' pts';
 }
 
 async function clearPlayers() {
@@ -1118,7 +1203,7 @@ async function clearPlayers() {
 
 async function resetGame() {
   clearInterval(timerInterval);
-  gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {}, rematch: true };
+  gameState = { status: 'waiting', currentQ: 0, revealed: false, timerRunning: false, timeLeft: 30, scores: {}, rematch: true, tiebreakerRound: 0, suddenDeath: false, tiedPlayerIds: [] };
   responses = {};
   for (const pid of Object.keys(players)) players[pid].score = 0;
   await gref('responses').remove();
@@ -1143,18 +1228,19 @@ function getDefaultQuestions() {
 }
 
 function renderQuestionsEditor() {
-  document.getElementById('bank-count').textContent = questionBank.length;
+  updateBankCount();
   const list = document.getElementById('questions-list');
   list.innerHTML = '';
   questionBank.forEach((q, qi) => {
     const div = document.createElement('div');
     const isPinned = !!pinnedQuestions[hashQuestion(q)];
-    div.className = 'q-editor' + (isPinned ? ' pinned' : '');
+    div.className = 'q-editor' + (isPinned ? ' pinned' : '') + (q.tiebreaker ? ' tiebreaker' : '');
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;">Q${qi+1}</span>
           <button class="pin-btn${isPinned ? ' active' : ''}" onclick="togglePin(${qi})" title="${isPinned ? 'Remove from guaranteed questions' : 'Guarantee this question in the next game'}">📌 ${isPinned ? 'Pinned' : 'Pin'}</button>
+          ${q.tiebreaker ? '<span class="tb-badge">🔥 Tie Breaker</span>' : ''}
         </div>
         <button onclick="removeQuestion(${qi})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;">Remove</button>
       </div>
@@ -1162,6 +1248,11 @@ function renderQuestionsEditor() {
       <textarea rows="2" onchange="updateQ(${qi},'question',this.value)">${q.question}</textarea>
       <label>Category</label>
       <input type="text" value="${q.category||''}" onchange="updateQ(${qi},'category',this.value)" placeholder="e.g. Tech, Science, Sports">
+      <label>Question Type</label>
+      <select onchange="setTiebreaker(${qi}, this.value==='true')">
+        <option value="false" ${!q.tiebreaker ? 'selected' : ''}>Normal</option>
+        <option value="true" ${q.tiebreaker ? 'selected' : ''}>Tie Breaker</option>
+      </select>
       <label>Options (click to mark correct)</label>
       <div class="opt-inputs">
         ${q.options.map((opt,oi) => `
@@ -1179,6 +1270,7 @@ function renderQuestionsEditor() {
 function updateQ(qi, field, val) { questionBank[qi][field] = val; gref('questionBank').set(questionBank); }
 function updateQOption(qi, oi, val) { questionBank[qi].options[oi] = val; gref('questionBank').set(questionBank); }
 function setCorrect(qi, oi) { questionBank[qi].correct = oi; gref('questionBank').set(questionBank); renderQuestionsEditor(); }
+function setTiebreaker(qi, val) { questionBank[qi].tiebreaker = val; gref('questionBank').set(questionBank); renderQuestionsEditor(); }
 function removeQuestion(qi) {
   const hash = hashQuestion(questionBank[qi]);
   if (pinnedQuestions[hash]) { delete pinnedQuestions[hash]; gref('pinnedQuestions').set(Object.keys(pinnedQuestions).length ? pinnedQuestions : null); }
@@ -1291,6 +1383,9 @@ async function generateQuestions() {
     btn.disabled = false; btnText.textContent = '↓ Fetch Questions';
     return;
   }
+
+  const isTiebreaker = document.getElementById('otdb-tiebreaker').value === 'true';
+  if (isTiebreaker) newQs = newQs.map(q => ({ ...q, tiebreaker: true }));
 
   questionBank = [...questionBank, ...newQs];
   await gref('questionBank').set(questionBank);
