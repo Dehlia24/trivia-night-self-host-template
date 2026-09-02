@@ -131,7 +131,9 @@
   .pin-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 2px 8px; transition: all 0.15s; font-family: var(--font-body); }
   .pin-btn:hover { border-color: rgba(247,194,106,0.5); color: #f7c26a; }
   .pin-btn.active { color: #f7c26a; border-color: rgba(247,194,106,0.55); background: rgba(247,194,106,0.1); }
-  .tb-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgba(224,36,36,0.12); color: var(--accent); }
+  .tb-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 2px 8px; transition: all 0.15s; font-family: var(--font-body); }
+  .tb-btn:hover { border-color: rgba(224,36,36,0.5); color: var(--accent); }
+  .tb-btn.active { color: var(--accent); border-color: rgba(224,36,36,0.55); background: rgba(224,36,36,0.1); }
   .q-editor label { font-size: 12px; color: var(--muted); font-weight: 500; display: block; margin-bottom: 6px; }
   .q-editor input, .q-editor select, .q-editor textarea {
     width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px;
@@ -1240,7 +1242,7 @@ function renderQuestionsEditor() {
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px;">Q${qi+1}</span>
           <button class="pin-btn${isPinned ? ' active' : ''}" onclick="togglePin(${qi})" title="${isPinned ? 'Remove from guaranteed questions' : 'Guarantee this question in the next game'}">📌 ${isPinned ? 'Pinned' : 'Pin'}</button>
-          ${q.tiebreaker ? '<span class="tb-badge">🔥 Tie Breaker</span>' : ''}
+          <button class="tb-btn${q.tiebreaker ? ' active' : ''}" onclick="setTiebreaker(${qi}, ${!q.tiebreaker})" title="${q.tiebreaker ? 'Remove from tie breakers' : 'Mark as a tie-breaker question'}">🔥 ${q.tiebreaker ? 'Tie Breaker' : 'Mark Tie Breaker'}</button>
         </div>
         <button onclick="removeQuestion(${qi})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:13px;">Remove</button>
       </div>
@@ -1248,11 +1250,6 @@ function renderQuestionsEditor() {
       <textarea rows="2" onchange="updateQ(${qi},'question',this.value)">${q.question}</textarea>
       <label>Category</label>
       <input type="text" value="${q.category||''}" onchange="updateQ(${qi},'category',this.value)" placeholder="e.g. Tech, Science, Sports">
-      <label>Question Type</label>
-      <select onchange="setTiebreaker(${qi}, this.value==='true')">
-        <option value="false" ${!q.tiebreaker ? 'selected' : ''}>Normal</option>
-        <option value="true" ${q.tiebreaker ? 'selected' : ''}>Tie Breaker</option>
-      </select>
       <label>Options (click to mark correct)</label>
       <div class="opt-inputs">
         ${q.options.map((opt,oi) => `
