@@ -789,7 +789,9 @@ function showQuestion(qi, state) {
   if (!q) return;
 
   showScreen('screen-question');
-  document.getElementById('p-q-label').textContent = 'Q' + (qi + 1) + ' of ' + questions.length;
+  document.getElementById('p-q-label').textContent = q.tiebreaker
+    ? (state.suddenDeath ? '💀 SUDDEN DEATH' : '🔥 TIE BREAKER')
+    : 'Q' + (qi + 1) + ' of ' + questions.length;
   document.getElementById('p-q-text').textContent  = q.question;
   document.getElementById('p-score').textContent   = myScore.toLocaleString();
   document.getElementById('p-result-banner').innerHTML = '';
@@ -844,7 +846,9 @@ function showReveal(qi, state) {
   if (!q) return;
 
   showScreen('screen-reveal');
-  document.getElementById('rv-q-label').textContent = 'Q' + (qi + 1) + ' result';
+  document.getElementById('rv-q-label').textContent = q.tiebreaker
+    ? (state.suddenDeath ? '💀 SUDDEN DEATH — Result' : '🔥 TIE BREAKER — Result')
+    : 'Q' + (qi + 1) + ' result';
   document.getElementById('rv-q-text').textContent  = q.question;
   document.getElementById('p-score3').textContent   = myScore.toLocaleString();
 
@@ -908,10 +912,11 @@ function showGameOver(players) {
 
   const lb = document.getElementById('final-lb');
   lb.innerHTML = '';
+  const topScore = sorted.length ? sorted[0].score : 0;
   sorted.forEach((p, i) => {
     const row = document.createElement('div');
     row.className = 'lb-row' + (p.id === myId ? ' me' : '');
-    row.innerHTML = `<span class="lb-rank">${i === 0 ? '🏆' : i + 1}</span><span class="lb-name">${p.name}${p.id === myId ? ' (you)' : ''}</span><span class="lb-score">${p.score.toLocaleString()}</span>`;
+    row.innerHTML = `<span class="lb-rank">${topScore > 0 && p.score === topScore ? '🏆' : i + 1}</span><span class="lb-name">${p.name}${p.id === myId ? ' (you)' : ''}</span><span class="lb-score">${p.score.toLocaleString()}</span>`;
     lb.appendChild(row);
   });
 }
