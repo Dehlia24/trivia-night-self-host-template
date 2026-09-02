@@ -633,6 +633,7 @@ let currentQIdx = -1;
 let gameStatus  = 'waiting';
 let timerInterval = null;
 let questions   = [];
+let isSpectating = false; // true when this is a sudden-death question and I'm not one of the tied players
 const LETTERS   = ['A','B','C','D'];
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
@@ -794,7 +795,11 @@ function showQuestion(qi, state) {
     : 'Q' + (qi + 1) + ' of ' + questions.length;
   document.getElementById('p-q-text').textContent  = q.question;
   document.getElementById('p-score').textContent   = myScore.toLocaleString();
-  document.getElementById('p-result-banner').innerHTML = '';
+
+  isSpectating = !!(q.tiebreaker && state.suddenDeath && !(state.tiedPlayerIds || []).includes(myId));
+  document.getElementById('p-result-banner').innerHTML = isSpectating
+    ? '<div class="result-banner timeout-r">👀 Sudden death — only the tied players can answer. Just watch!</div>'
+    : '';
 
   const grid = document.getElementById('p-options');
   grid.innerHTML = '';
@@ -802,7 +807,7 @@ function showQuestion(qi, state) {
     const btn = document.createElement('button');
     btn.className = 'opt-btn';
     btn.innerHTML = `<div class="opt-letter">${LETTERS[oi]}</div><span>${opt}</span>`;
-    btn.onclick   = () => submitAnswer(qi, oi);
+    if (isSpectating) { btn.disabled = true; } else { btn.onclick = () => submitAnswer(qi, oi); }
     grid.appendChild(btn);
   });
 
@@ -823,7 +828,7 @@ function showQuestion(qi, state) {
 
 // ─── Submit answer ────────────────────────────────────────────────────────────
 async function submitAnswer(qi, oi) {
-  if (myAnswers[qi] !== undefined) return;
+  if (myAnswers[qi] !== undefined || isSpectating) return;
   myAnswers[qi] = oi;
 
   // Highlight selected button
@@ -868,8 +873,11 @@ function showReveal(qi, state) {
     grid.appendChild(btn);
   });
 
+  const wasSpectating = q.tiebreaker && state.suddenDeath && !(state.tiedPlayerIds || []).includes(myId);
   const banner = document.getElementById('rv-result-banner');
-  if (myAns === undefined) {
+  if (wasSpectating) {
+    banner.innerHTML = '<div class="result-banner timeout-r">👀 You were watching — this round was between the tied players</div>';
+  } else if (myAns === undefined) {
     banner.innerHTML = '<div class="result-banner timeout-r">⏱ Time\'s up — no answer submitted</div>';
   } else if (myAns === correct) {
     banner.innerHTML = '<div class="result-banner correct-r">✓ Correct! Points added to your score</div>';
